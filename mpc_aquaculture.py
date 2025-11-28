@@ -15,12 +15,12 @@ from scipy.integrate import solve_ivp
 #=========================================================================
 
 h     = 0.8
-p     = 1.5         #
+p     = 1.5        
 b     = 0.62
 a     = 0.53
 m     = 0.67
 n     = 0.81
-T     = 30          #
+T     = 30          
 T_min = 24
 k_min = 0.00133
 j     = 0.0132
@@ -31,10 +31,15 @@ DO_crt= 0.3
 DO_min= 1
 UIA_crit=0.06
 UIA_max=1.4
-UIA   = 0.5
-p_feed= 0.7                      # feed price per kg
-p_fish= 2                        # fish price per kg
-w0    = 0.1                        # initial weight in kg
+p_feed= 0.7                        # feed price per kg
+p_fish= 2                          # fish price per kg
+w0    = 0.0001                     # initial weight in kg
+Nf    = 0.03                       # [g TAN / g feed]  <-- example value
+V_water= 100.0                     # [m^3] system water volume
+V_BF = 10.0                        # [m^3] biofilter volume
+n_BF = 0.5                         # [g TAN / (m^3 BF · day)] coefficient
+k_BF = 0.7                         # exponent
+TAN0 = 0.1                         # initial TAN
 
 #=========================================================================
 # End of Parameters and constraints
@@ -48,41 +53,54 @@ def tao(t):         # effects of temperature tao(T)
  k = 4.6
  if t > T_opt:
   return math.exp(-k*((t - T_opt) / (T_max - T_opt))**4) 
- 
  if t < T_opt:
   return math.exp(-k*((T_opt - t) / (T_opt - T_min))**4) 
+ return 1.0
 
 def segma(x):       # dissolved oxygen function segma(DO)
  if x > DO_crt:
   return 1
- 
  if DO_min < x < DO_crt:
-  return (DO - DO_min)/(DO_crt - DO_min)
- 
+  return (x - DO_min)/(DO_crt - DO_min)
  else:
   return 0
   
 def v(x):           # unionized ammonia v(UIA)
  if x < UIA_crit:
   return 1
- 
  if UIA_crit < x < UIA_max:
-  return (UIA_max - UIA) / (UIA_max - UIA_crit)
- 
+  return (UIA_max - x) / (UIA_max - UIA_crit)
  else:
   return 0
+ 
+def BF_capacity(TAN_prev):
+    # BF_{t-1} = n_{t-1} * (TAN_{t-1})^{k-1}
+    return n_BF * (TAN_prev ** k_BF)
 
-def dwdt(t, w, f):      
+def update_TAN(TAN_prev, feed_kg):
+    feed_g = feed_kg * 1000.0     # convert to grams
+
+    input_term   = (Nf * feed_g) / V_water          
+    BF_prev      = BF_capacity(TAN_prev)            
+    removal_term = (BF_prev * V_BF) / V_water       
+
+    TAN_next = TAN_prev + input_term - removal_term
+    return max(TAN_next, 0.0)  
+
+def TAN_to_UIA(TAN, frac_UIA=0.05):
+  # Assume 5% of TAN is unionized NH3
+  return TAN * frac_UIA
+
+def dwdt(t, w, UIA, f):      
  # Our main function describing the change in weight as a function of current weight and time dw/dt
-
  return h*p*f*b*(1-a)*tao(T)*segma(DO)*v(UIA)*w**m -k_min * math.exp(j*(T-T_min))*w**n
 
-def profit(w, f):       
+def profit(w_final ,w_initial, f):       
  # w is the final weight of the fish, f (in kg) is the feed in each day(list)
  total_feed = 0
  for i in range(len(f)):
   total_feed += f[i]
- return w * p_fish - total_feed * p_feed
+ return (w_final - w_initial) * p_fish - total_feed * p_feed
 
 #=========================================================================
 # Equations Used End
@@ -97,37 +115,85 @@ total_days  = 200
 weights     = [w0]
 feeds       = []
 profit_lst  = []
-feeding_list= np.arange(0.001,0.06,0.001)
-
-'''
-Here is the Main function, for now this calculate the best feed out of (0.1,0.2,...,1) precent out of the fish weight,
-and when it finds the one with the best profit it chooses that and continues to the next day - meaning out prediction horizen = 1 for now
-'''
+feeding_list= np.arange(0.01,0.2,0.005)
+pred_horiz  = 7
+tan_lst     = [TAN0]
 
 for day in range(total_days):
-    days_weights = []
-    days_list = []
-    w_current = weights[day]              
+    ''' 
+    We iterate over the total days of the simulation, each day, we calculate over a prediction horizen
+    and predict the feed to get the max profit over it, once we find the feed, we choose it and add the 
+    chosen parameters, and we continue to the next day.
+    '''
+    w_current    = weights[-1]
+    pred_profit  = []
+    TAN_current  = tan_lst[-1]
+
+     # --- MPC prediction: try each candidate feed ratio ---
     for feed in feeding_list:
-        w_new   = solve_ivp(dwdt, t_span, [w_current], args=(feed,))
-        days_weights.append(w_new.y[-1][-1])
-        days_list.append(feed * w_current)
+      pred_weights = [w_current]
+      pred_feeds_kg = []
+      w_tmp = w_current
+      pred_tan = [TAN_current]
+      tan_tmp = TAN_current
+      valid = True
 
-    days_profit = []
-    for i in range(len(days_weights)):
-        days_profit.append(profit(days_weights[i],[days_list[i]]))
+      # We iterate over the prediction horizen to check best profit 
+      for pred_day in range(pred_horiz):
+        UIA_current  = TAN_to_UIA(tan_tmp)
 
-    # Figure out which feed gives max profit
-    info_mat = np.column_stack((days_list,days_weights ,days_profit))
-    last_column = info_mat[:, -1]
-    max_index = np.argmax(last_column)
-    best_row = info_mat[max_index]
+        # --- Firstly we check if the current UIA fits the constraints ---
+        if UIA_current > UIA_crit:      
+            valid = False
+            break
+        
+        # --- We integrate over the next day of the prediction ---
+        w_new_pred = solve_ivp(lambda t, w: dwdt(t, w, UIA_current, feed),t_span,[w_tmp])
+
+        # --- Update Parameters: ---
+        w_tmp = w_new_pred.y[0, -1]
+        pred_weights.append(w_tmp)
+
+        tan_tmp = update_TAN(tan_tmp, feed * w_tmp)
+        pred_tan.append(tan_tmp)
+
+        pred_feeds_kg.append(feed * w_tmp)
+
+      if valid:
+        pred_profit.append(profit(pred_weights[-1],pred_weights[0],pred_feeds_kg))
+      else:
+        # strongly penalize this feed so MPC will not choose it
+        pred_profit.append(-1e9)
+      
     
-    # Add everything and update current weight
-    weights.append(best_row[1])
-    feeds.append(best_row[0])          # This calculates the feed per kg (f is the feed pecent from the fish weight, w is the weight of the day)
-    profit_lst.append(best_row[2])
+    # --- find the max profit and choose that
+    max_index = int(np.argmax(pred_profit))
+    max_feed  = feeding_list[max_index]
+    feeds.append(max_feed)
 
+    # recompute UIA from the actual TAN state
+    UIA_real = TAN_to_UIA(TAN_current)
+    w_new   = solve_ivp(lambda t, w: dwdt(t, w, UIA_real, max_feed),t_span,[w_current]) 
+    w_next = w_new.y[0, -1]
+    
+    # --- we update daily params
+    feed_today_kg = max_feed * w_current
+    TAN_current = update_TAN(TAN_current, feed_today_kg)
+    daily_profit = profit(w_next, w_current, [feed_today_kg])
+
+    weights.append(w_next)
+
+    tan_lst.append(TAN_current)
+
+    if profit_lst:
+      profit_lst.append(profit_lst[-1] + daily_profit)
+    else:
+      profit_lst.append(daily_profit)
+
+    # ---break if the profit becomes negative --- loosing money
+    #if daily_profit < 0:
+      #break
+  
 
 #=========================================================================
 # End of Main Function
@@ -137,9 +203,7 @@ for day in range(total_days):
 # Plots
 # ========================================================================
 
-
-
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 
 # 1. Weight Plot
 ax1.plot(range(len(weights)), weights, label='Weight', color='blue')
@@ -160,6 +224,17 @@ ax3.set_ylabel('Feed (kg)')
 ax3.set_xlabel('Time (days)')
 ax3.grid(True)
 ax3.legend()
+
+# 4. TAN / UIA Plot
+UIA_list = [TAN_to_UIA(t) for t in tan_lst]
+
+ax4.plot(range(len(tan_lst)), tan_lst, label='TAN (mg/L)', color='purple')
+ax4.plot(range(len(UIA_list)), UIA_list, label='UIA (mg/L)', color='orange', linestyle='--')
+
+ax4.set_ylabel('TAN / UIA')
+ax4.set_xlabel('Time (days)')
+ax4.grid(True)
+ax4.legend()
 
 plt.tight_layout()
 plt.show()
