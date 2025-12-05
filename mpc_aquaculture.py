@@ -37,7 +37,7 @@ DO_max   = 5.0
 DO_base  = 2.0   # Baseline DO
  
 cT       = 0.00  # cost per celcious * day                    #
-cDO      = 0.06  # cost per mg/l                              #
+cDO      = 0.03  # cost per mg/l                              #
 
 UIA_crit = 0.06
 UIA_max  = 1.4
@@ -146,9 +146,6 @@ def profit(w_final: float,
 # =========================================================================
 # Genetic Algorithm – temperature & DO optimization
 # =========================================================================
-
-Genome     = []  # list of possible solutions (not used explicitly)
-population = []  # list of genomes
 
 
 def generate_genome(first_lst: list, second_lst: list):
@@ -361,8 +358,8 @@ def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan
 # =========================================================================
 
 # MPC in GA params
-total_days_GA   = 20
-pred_horiz_GA   = 2
+total_days_GA   = 40
+pred_horiz_GA   = 3
 feeding_list_GA = np.arange(0.01, 0.2, 0.05)
 
 population_size = 20
@@ -371,7 +368,7 @@ num_generations = 10
 DO_lst   = np.arange(DO_min, DO_max, 0.1)
 Temp_lst = np.arange(T_min, T_max, 0.5)
 
-TAN0 = 0.1     # initial TAN
+TAN0 = 0.01    # initial TAN
 w0   = 0.0001  # initial weight in kg
 
 population = generate_population(population_size, Temp_lst, DO_lst)
@@ -410,6 +407,8 @@ for gen in range(num_generations):
             new_pop.append(c2)
 
     population = new_pop
+    print(f"Gen {gen}: best_fit={best_fit:.3f}, T={best_ind[0]:.2f}, DO={best_ind[1]:.2f}")
+
 
 opt_T = best_ind[0]
 opt_DO= best_ind[1]
