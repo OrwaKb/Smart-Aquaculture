@@ -16,23 +16,28 @@ from scipy.integrate import solve_ivp
 # Parameters and constraints
 # =========================================================================
 
-h       = 0.8
-p       = 1.5
-b       = 0.62
-a       = 0.53
-m       = 0.67
-n       = 0.81
+h        = 0.8
+p        = 1.5
+b        = 0.62
+a        = 0.53
+m        = 0.67
+n        = 0.81
 
-T_min   = 24
-T_opt   = 33   # intrinsic optimal temperature used in tao(T)
-T_max   = 40
+T_min    = 24
+T_opt    = 33   # intrinsic optimal temperature used in tao(T)
+T_max    = 40
+T_env    = 28   # Temperature of the room
 
-k_min   = 0.00133
-j       = 0.0132
+k_min    = 0.00133
+j        = 0.0132
 
-DO_crt  = 3.0
-DO_min  = 1.0
-DO_max  = 5.0
+DO_crt   = 3.0
+DO_min   = 1.0
+DO_max   = 5.0
+DO_base  = 2.0   # Baseline DO
+ 
+cT       = 0.00  # cost per celcious * day                    #
+cDO      = 0.06  # cost per mg/l                              #
 
 UIA_crit = 0.06
 UIA_max  = 1.4
@@ -111,13 +116,32 @@ def dwdt(t: float, w: float, UIA: float, f: float, T: float, DO: float) -> float
     return growth - loss
 
 
-def profit(w_final: float, w_initial: float, f_list) -> float:
+def profit(w_final: float,
+           w_initial: float,
+           f_list,
+           T: float,
+           DO: float,
+           days: int) -> float:
     """
-    Profit for a period:
-    w_final, w_initial in kg; f_list is a list of feed amounts in kg.
+    Bio-economic profit for a given period.
+
+    :param w_final:  final fish weight (kg)
+    :param w_initial: initial fish weight (kg)
+    :param f_list:   list of feed amounts in kg over the period
+    :param T:        water temperature (°C)
+    :param DO:       dissolved oxygen (mg/L)
+    :param days:     number of days in this profit period
     """
     total_feed = sum(f_list)
-    return (w_final - w_initial) * p_fish - total_feed * p_feed
+
+    revenue = (w_final - w_initial) * p_fish
+    feed_cost = total_feed * p_feed
+    temp_cost = cT * max(0.0, T - T_env) * days
+    do_cost   = cDO * max(0.0, DO - DO_base)**2 * days
+
+    total_cost = feed_cost + temp_cost + do_cost
+
+    return revenue - total_cost
 
 # =========================================================================
 # Genetic Algorithm – temperature & DO optimization
@@ -292,7 +316,7 @@ def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan
 
             if valid and pred_feeds_kg:
                 pred_profit.append(
-                    profit(pred_weights[-1], pred_weights[0], pred_feeds_kg)
+                    profit(pred_weights[-1], pred_weights[0], pred_feeds_kg, T, DO, pred_horiz)
                 )
             else:
                 # strongly penalize this feed so MPC will not choose it
@@ -315,7 +339,7 @@ def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan
         # Update daily parameters
         feed_today_kg = max_feed * w_current
         TAN_current   = update_TAN(TAN_current, feed_today_kg)
-        daily_profit  = profit(w_next, w_current, [feed_today_kg])
+        daily_profit  = profit(w_next, w_current, [feed_today_kg], T, DO, 1)
 
         weights.append(w_next)
         tan_lst.append(TAN_current)
