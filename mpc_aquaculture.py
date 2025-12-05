@@ -147,7 +147,7 @@ def profit(w_final: float,
 # Genetic Algorithm – temperature & DO optimization
 # =========================================================================
 
-Genome     = []  # list of possible solutions 
+Genome     = []  # list of possible solutions (not used explicitly)
 population = []  # list of genomes
 
 
@@ -176,7 +176,7 @@ def fit_evaluation(population):
     fitness_lst = []
     for pair in population:
         weights, feeds, profit_lst, tan_lst = MPC(
-            total_days, pred_horiz, feeding_list, pair[0], pair[1], w0, TAN0
+            total_days_GA, pred_horiz_GA, feeding_list_GA, pair[0], pair[1], w0, TAN0
         )
         fitness = profit_lst[-1]
         fitness_lst.append(fitness)
@@ -248,7 +248,7 @@ def mutate(ind, mut_rate_T: float = 0.2, mut_rate_DO: float = 0.2,
 # =========================================================================
 
 
-def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan):
+def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan, stop = True):
     """
     Model Predictive Control (MPC) system.
 
@@ -350,8 +350,9 @@ def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan
             profit_lst.append(daily_profit)
 
         # Optional: stop if profit becomes negative
-        if daily_profit < 0:
-            break
+        if stop == True:
+            if daily_profit < 0:
+                break
 
     return weights, feeds, profit_lst, tan_lst
 
@@ -359,9 +360,11 @@ def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan
 # Main
 # =========================================================================
 
-total_days      = 10
-pred_horiz      = 7
-feeding_list    = np.arange(0.01, 0.2, 0.01)
+# MPC in GA params
+total_days_GA   = 20
+pred_horiz_GA   = 2
+feeding_list_GA = np.arange(0.01, 0.2, 0.05)
+
 population_size = 20
 num_generations = 10
 
@@ -373,6 +376,11 @@ w0   = 0.0001  # initial weight in kg
 
 population = generate_population(population_size, Temp_lst, DO_lst)
 fit_lst    = fit_evaluation(population)
+
+# Main MPC params
+total_days   = 200
+pred_horiz   = 7
+feeding_list = np.arange(0.01,0.2,0.01)
 
 best_ind = None
 best_fit = -np.inf
@@ -403,18 +411,23 @@ for gen in range(num_generations):
 
     population = new_pop
 
-print(np.hstack(best_ind))
+opt_T = best_ind[0]
+opt_DO= best_ind[1]
+
+weights, feeds, profit_lst, tan_lst = MPC(
+    total_days, pred_horiz, feeding_list, opt_T, opt_DO, w0, TAN0, False
+        )
 
 # =========================================================================
 # Plots 
 # =========================================================================
-'''
+
 fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 
 # 1. Weight Plot
 ax1.plot(range(len(weights)), weights, label='Weight', color='blue')
 ax1.set_ylabel('Weight (kg)')
-ax1.set_title(f'Simulation Results ({total_days} Days)')
+ax1.set_title(f'Simulation Results ({total_days} Days), T = ({opt_T:.2f}), DO = ({opt_DO:.2f})')
 ax1.grid(True)
 ax1.legend()
 
@@ -442,8 +455,7 @@ ax4.legend()
 
 plt.tight_layout()
 plt.show()
-'''
+
 # =========================================================================
 # End Plots
 # =========================================================================
-
