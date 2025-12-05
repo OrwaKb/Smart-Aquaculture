@@ -147,7 +147,7 @@ def profit(w_final: float,
 # Genetic Algorithm – temperature & DO optimization
 # =========================================================================
 
-Genome     = []  # list of possible solutions (not used explicitly)
+Genome     = []  # list of possible solutions 
 population = []  # list of genomes
 
 
@@ -406,7 +406,7 @@ for gen in range(num_generations):
 print(np.hstack(best_ind))
 
 # =========================================================================
-# Plots (optional – currently commented out)
+# Plots 
 # =========================================================================
 '''
 fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
@@ -446,3 +446,4 @@ plt.show()
 # =========================================================================
 # End Plots
 # =========================================================================
+
