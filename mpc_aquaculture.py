@@ -1,5 +1,6 @@
 """
-Model Predictive System (MPC)
+Model Predictive Control (MPC) with Genetic Algorithm (GA)
+for optimal temperature and dissolved oxygen selection.
 
 @author: Orwa Kblawe
 Date: Nov 2025
@@ -8,6 +9,7 @@ Date: Nov 2025
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import random as rand
 from scipy.integrate import solve_ivp
 
 # =========================================================================
@@ -21,40 +23,36 @@ a       = 0.53
 m       = 0.67
 n       = 0.81
 
-T       = 30
 T_min   = 24
-T_opt   = 33
+T_opt   = 33   # intrinsic optimal temperature used in tao(T)
 T_max   = 40
 
 k_min   = 0.00133
 j       = 0.0132
 
-DO      = 1.5
-DO_crt  = 0.3
+DO_crt  = 3.0
 DO_min  = 1.0
+DO_max  = 5.0
 
 UIA_crit = 0.06
 UIA_max  = 1.4
 
-p_feed   = 0.7   # feed price per kg
-p_fish   = 2.0   # fish price per kg
-
-w0       = 0.0001  # initial weight in kg
+p_feed   = 0.7  # feed price per kg
+p_fish   = 2.0  # fish price per kg
 
 # TAN / biofilter parameters
-Nf       = 0.03    # [g TAN / g feed]
-V_water  = 100.0   # [m^3] system water volume
-V_BF     = 10.0    # [m^3] biofilter volume
-n_BF     = 0.5     # [g TAN / (m^3 BF · day)]
-k_BF     = 0.7     # exponent
-TAN0     = 0.1     # initial TAN
+Nf       = 0.03   # [g TAN / g feed]
+V_water  = 100.0  # [m^3] system water volume
+V_BF     = 10.0   # [m^3] biofilter volume
+n_BF     = 0.5    # [g TAN / (m^3 BF · day)]
+k_BF     = 0.7    # exponent
 
 # =========================================================================
-# Equations Used - Define
+# Biological / MPC equations
 # =========================================================================
 
 def tao(t: float) -> float:
-    """Temperature effect tao(T)."""
+    """Temperature effect τ(T)."""
     k = 4.6
     if t > T_opt:
         return math.exp(-k * ((t - T_opt) / (T_max - T_opt))**4)
@@ -64,8 +62,8 @@ def tao(t: float) -> float:
 
 
 def segma(x: float) -> float:
-    """Dissolved oxygen function σ(DO)."""
-    if x > DO_crt:
+    """Dissolved oxygen limitation function σ(DO)."""
+    if x >= DO_crt:
         return 1.0
     if DO_min < x < DO_crt:
         return (x - DO_min) / (DO_crt - DO_min)
@@ -103,7 +101,7 @@ def TAN_to_UIA(TAN: float, frac_UIA: float = 0.05) -> float:
     return TAN * frac_UIA
 
 
-def dwdt(t: float, w: float, UIA: float, f: float) -> float:
+def dwdt(t: float, w: float, UIA: float, f: float, T: float, DO: float) -> float:
     """
     Main growth ODE: dw/dt as a function of weight, UIA and feed ratio.
     f is feeding ratio (fraction of body weight per day).
@@ -122,106 +120,271 @@ def profit(w_final: float, w_initial: float, f_list) -> float:
     return (w_final - w_initial) * p_fish - total_feed * p_feed
 
 # =========================================================================
-# Main Function
+# Genetic Algorithm – temperature & DO optimization
 # =========================================================================
 
-t_span       = [0, 1]                 # integrate over 1 day
-total_days   = 200
-pred_horiz   = 7
-feeding_list = np.arange(0.01, 0.2, 0.005)
+Genome     = []  # list of possible solutions (not used explicitly)
+population = []  # list of genomes
 
-weights   = [w0]
-tan_lst   = [TAN0]
-feeds     = []
-profit_lst = []
 
-for day in range(total_days):
+def generate_genome(first_lst: list, second_lst: list):
     """
-    For each day, we run an MPC step:
-    - Predict over a horizon for each candidate feed ratio.
-    - Choose the ratio that maximizes predicted profit (with UIA constraint).
-    - Apply that feed to the real system for one day.
+    Generate a candidate solution (T, DO) by random choice
+    from the provided discrete lists.
     """
-    w_current   = weights[-1]
-    TAN_current = tan_lst[-1]
-    pred_profit = []
+    return rand.choice(first_lst), rand.choice(second_lst)
 
-    # --- MPC prediction: try each candidate feed ratio ---
-    for feed in feeding_list:
-        pred_weights   = [w_current]
-        pred_feeds_kg  = []
-        pred_tan       = [TAN_current]
-        w_tmp          = w_current
-        tan_tmp        = TAN_current
-        valid          = True
 
-        # Predict over the horizon
-        for _ in range(pred_horiz):
-            UIA_current = TAN_to_UIA(tan_tmp)
+def generate_population(size: int, first_lst: list, second_lst: list):
+    """
+    Generate a population of candidate solutions using the predefined
+    generate_genome function.
+    """
+    return [generate_genome(first_lst, second_lst) for _ in range(size)]
 
-            # UIA constraint
-            if UIA_current > UIA_crit:
-                valid = False
-                break
 
-            # Integrate one day ahead
-            sol = solve_ivp(
-                lambda t, w: dwdt(t, w, UIA_current, feed),
-                t_span,
-                [w_tmp]
-            )
-            w_tmp = sol.y[0, -1]
-            pred_weights.append(w_tmp)
+def fit_evaluation(population):
+    """
+    Given a population, return a list of fitness values.
+    In this case the fitness of a (T, DO) pair is its resulting profit
+    when used inside the MPC controller.
+    """
+    fitness_lst = []
+    for pair in population:
+        weights, feeds, profit_lst, tan_lst = MPC(
+            total_days, pred_horiz, feeding_list, pair[0], pair[1], w0, TAN0
+        )
+        fitness = profit_lst[-1]
+        fitness_lst.append(fitness)
+    return fitness_lst
 
-            # Update TAN and feed
-            feed_kg = feed * w_tmp
-            tan_tmp = update_TAN(tan_tmp, feed_kg)
-            pred_tan.append(tan_tmp)
-            pred_feeds_kg.append(feed_kg)
 
-        if valid and pred_feeds_kg:
-            pred_profit.append(
-                profit(pred_weights[-1], pred_weights[0], pred_feeds_kg)
-            )
+def select_parent(population, fitness, k=3):
+    """
+    Tournament selection: choose k random individuals and return
+    a copy of the one with the highest fitness.
+    """
+    candidates = rand.sample(range(len(population)), k)
+    best_index = max(candidates, key=lambda i: fitness[i])
+    return population[best_index][:]
+
+
+def crossover(p1, p2, crossover_rate: float = 0.9):
+    """
+    Blend crossover between two parents to create new offspring.
+
+    With probability (1 - crossover_rate), parents are copied directly.
+    Otherwise, a random blend factor is used to linearly combine T and DO.
+    """
+    if rand.random() > crossover_rate:
+        return p1[:], p2[:]  # copies
+
+    blend_fac = rand.random()
+
+    # create two children by mixing p1 and p2
+    c1 = [
+        blend_fac * p1[0] + (1 - blend_fac) * p2[0],  # T
+        blend_fac * p1[1] + (1 - blend_fac) * p2[1]   # DO
+    ]
+
+    c2 = [
+        blend_fac * p2[0] + (1 - blend_fac) * p1[0],
+        blend_fac * p2[1] + (1 - blend_fac) * p1[1]
+    ]
+
+    return c1, c2
+
+
+def mutate(ind, mut_rate_T: float = 0.2, mut_rate_DO: float = 0.2,
+           std_T: float = 0.5, std_DO: float = 0.2):
+    """
+    Mutation operator: introduces small random changes to offspring.
+    This helps avoid local optima and maintains diversity.
+
+    :param ind:        individual [T, DO] that we want to mutate
+    :param mut_rate_T: probability of mutating the temperature T
+    :param mut_rate_DO: probability of mutating the dissolved oxygen DO
+    :param std_T:      standard deviation of Gaussian noise added to T
+    :param std_DO:     standard deviation of Gaussian noise added to DO
+    """
+    T, DO = ind
+    if rand.random() < mut_rate_T:
+        T += rand.gauss(0, std_T)
+    if rand.random() < mut_rate_DO:
+        DO += rand.gauss(0, std_DO)
+
+    # clip to bounds
+    T = min(max(T, T_min), T_max)
+    DO = min(max(DO, DO_min), DO_max)
+
+    return [T, DO]
+
+# =========================================================================
+# MPC Function
+# =========================================================================
+
+
+def MPC(total_days, pred_horiz, feeding_list, T, DO, initial_weight, initial_Tan):
+    """
+    Model Predictive Control (MPC) system.
+
+    Evaluates and predicts what will happen in the next pred_horiz days
+    for each candidate feed ratio and chooses the best feed for each day.
+
+    This function is also used by the GA as the fitness evaluator,
+    returning the cumulative profit.
+
+    :param total_days:     total days of the simulation
+    :param pred_horiz:     prediction horizon (days ahead to simulate)
+    :param feeding_list:   list of feed ratios tested
+    :param T:              water temperature
+    :param DO:             dissolved oxygen
+    :param initial_weight: initial weight of the fish (kg)
+    :param initial_Tan:    initial TAN of the tank
+    """
+    weights    = [initial_weight]
+    tan_lst    = [initial_Tan]
+    feeds      = []
+    profit_lst = []
+    t_span     = [0, 1]  # integrate over 1 day
+
+    for day in range(total_days):
+        # For each day, run an MPC step:
+        # - Predict over a horizon for each candidate feed ratio.
+        # - Choose the ratio that maximizes predicted profit (with UIA constraint).
+        # - Apply that feed to the real system for one day.
+        w_current   = weights[-1]
+        TAN_current = tan_lst[-1]
+        pred_profit = []
+
+        # --- MPC prediction: try each candidate feed ratio ---
+        for feed in feeding_list:
+            pred_weights   = [w_current]
+            pred_feeds_kg  = []
+            pred_tan       = [TAN_current]
+            w_tmp          = w_current
+            tan_tmp        = TAN_current
+            valid          = True
+
+            # Predict over the horizon
+            for _ in range(pred_horiz):
+                UIA_current = TAN_to_UIA(tan_tmp)
+
+                # UIA constraint
+                if UIA_current > UIA_crit:
+                    valid = False
+                    break
+
+                # Integrate one day ahead
+                sol = solve_ivp(
+                    lambda t, w: dwdt(t, w, UIA_current, feed, T, DO),
+                    t_span,
+                    [w_tmp]
+                )
+                w_tmp = sol.y[0, -1]
+                pred_weights.append(w_tmp)
+
+                # Update TAN and feed
+                feed_kg = feed * w_tmp
+                tan_tmp = update_TAN(tan_tmp, feed_kg)
+                pred_tan.append(tan_tmp)
+                pred_feeds_kg.append(feed_kg)
+
+            if valid and pred_feeds_kg:
+                pred_profit.append(
+                    profit(pred_weights[-1], pred_weights[0], pred_feeds_kg)
+                )
+            else:
+                # strongly penalize this feed so MPC will not choose it
+                pred_profit.append(-1e9)
+
+        # Choose feed with maximum predicted profit
+        max_index = int(np.argmax(pred_profit))
+        max_feed  = feeding_list[max_index]
+        feeds.append(max_feed)
+
+        # Apply chosen feed to real system for one day
+        UIA_real = TAN_to_UIA(TAN_current)
+        sol_real = solve_ivp(
+            lambda t, w: dwdt(t, w, UIA_real, max_feed, T, DO),
+            t_span,
+            [w_current]
+        )
+        w_next = sol_real.y[0, -1]
+
+        # Update daily parameters
+        feed_today_kg = max_feed * w_current
+        TAN_current   = update_TAN(TAN_current, feed_today_kg)
+        daily_profit  = profit(w_next, w_current, [feed_today_kg])
+
+        weights.append(w_next)
+        tan_lst.append(TAN_current)
+
+        if profit_lst:
+            profit_lst.append(profit_lst[-1] + daily_profit)
         else:
-            # strongly penalize this feed so MPC will not choose it
-            pred_profit.append(-1e9)
+            profit_lst.append(daily_profit)
 
-    # Choose feed with maximum predicted profit
-    max_index = int(np.argmax(pred_profit))
-    max_feed  = feeding_list[max_index]
-    feeds.append(max_feed)
+        # Optional: stop if profit becomes negative
+        if daily_profit < 0:
+            break
 
-    # Apply chosen feed to real system for one day
-    UIA_real = TAN_to_UIA(TAN_current)
-    sol_real = solve_ivp(
-        lambda t, w: dwdt(t, w, UIA_real, max_feed),
-        t_span,
-        [w_current]
-    )
-    w_next = sol_real.y[0, -1]
-
-    # Update daily parameters
-    feed_today_kg = max_feed * w_current
-    TAN_current   = update_TAN(TAN_current, feed_today_kg)
-    daily_profit  = profit(w_next, w_current, [feed_today_kg])
-
-    weights.append(w_next)
-    tan_lst.append(TAN_current)
-
-    if profit_lst:
-        profit_lst.append(profit_lst[-1] + daily_profit)
-    else:
-        profit_lst.append(daily_profit)
-
-    # Optional: stop if profit becomes negative
-    # if daily_profit < 0:
-    #     break
+    return weights, feeds, profit_lst, tan_lst
 
 # =========================================================================
-# Plots
+# Main
 # =========================================================================
 
+total_days      = 10
+pred_horiz      = 7
+feeding_list    = np.arange(0.01, 0.2, 0.01)
+population_size = 20
+num_generations = 10
+
+DO_lst   = np.arange(DO_min, DO_max, 0.1)
+Temp_lst = np.arange(T_min, T_max, 0.5)
+
+TAN0 = 0.1     # initial TAN
+w0   = 0.0001  # initial weight in kg
+
+population = generate_population(population_size, Temp_lst, DO_lst)
+fit_lst    = fit_evaluation(population)
+
+best_ind = None
+best_fit = -np.inf
+
+for gen in range(num_generations):
+    fits = fit_evaluation(population)
+
+    # track global best
+    idx_best = int(np.argmax(fits))
+    if fits[idx_best] > best_fit:
+        best_fit = fits[idx_best]
+        best_ind = population[idx_best]
+
+    new_pop = []
+    # elitism: keep the best
+    new_pop.append(best_ind)
+
+    # create rest of population
+    while len(new_pop) < population_size:
+        p1 = select_parent(population, fits)
+        p2 = select_parent(population, fits)
+        c1, c2 = crossover(p1, p2)
+        c1 = mutate(c1)
+        c2 = mutate(c2)
+        new_pop.append(c1)
+        if len(new_pop) < population_size:
+            new_pop.append(c2)
+
+    population = new_pop
+
+print(np.hstack(best_ind))
+
+# =========================================================================
+# Plots (optional – currently commented out)
+# =========================================================================
+'''
 fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 
 # 1. Weight Plot
@@ -255,7 +418,7 @@ ax4.legend()
 
 plt.tight_layout()
 plt.show()
-
+'''
 # =========================================================================
 # End Plots
 # =========================================================================
