@@ -21,7 +21,7 @@ j        = 0.0132
 
 DO_crt   = 3.0
 DO_min   = 1.0
-DO_max   = 5.0
+DO_max   = 15.0
 DO_base  = 2.0   # Baseline DO
  
 cT       = 0.00  # cost per celcious * day                    #
@@ -30,8 +30,11 @@ cDO      = 0.03  # cost per mg/l
 UIA_crit = 0.06
 UIA_max  = 1.4
 
-p_feed   = 0.7  # feed price per kg
-p_fish   = 2.0  # fish price per kg
+p_feed   = 1.0  # feed price per kg
+p_fish   = 8.0  # fish price per kg
+
+feed_min = 0.005
+feed_max = 0.05
 
 # TAN / biofilter parameters
 Nf       = 0.03   # [g TAN / g feed]
@@ -42,11 +45,18 @@ k_BF     = 0.7    # exponent
 
 # =========== Parameters from m.saadi's code ===========
 
-area     = 10.5 # [m2] the total area of heat transfere. calculated based on the system in the lab  
+area     = 10.5  # [m2] the total area of heat transfere. calculated based on the system in the lab  
 
 PH       = 7     # level of PH in the water (7)
 PK_a     = 9.4   # acidity constant 9.4 at 20C
 
-electricity_price = 0.06 
+electricity_price = 0.001 
 
+N_fish = 100
+
+TAN_max = 1.0
+
+# GA params
+num_gens = 10
+population_size = 20
 #=============================================================================

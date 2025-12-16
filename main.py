@@ -11,51 +11,34 @@ import matplotlib.pyplot as plt
 
 from params import *
 from mpc import MPC
-from ga import run_ga
 from bio_model import TAN_to_UIA
 
 # =========================================================================
 # Main
 # =========================================================================
 
-# MPC in GA params
-total_days_GA   = 20
-pred_horiz_GA   = 3
-feeding_list_GA = np.arange(0.01, 0.2, 0.05)
-
-population_size = 20
-num_generations = 10
-
 DO_lst   = np.arange(DO_min, DO_max, 0.1)
 Temp_lst = np.arange(T_min, T_max, 0.5)
+feed_lst = np.arange(feed_min, feed_max, 0.0025)
 
 TAN0 = 0.01    # initial TAN
-w0   = 0.0001  # initial weight in kg
+w0   = 0.05    # initial weight in kg
 
-# Main MPC params
-total_days   = 200
-pred_horiz   = 7
-feeding_list = np.arange(0.01,0.2,0.01)
+total_days = 200
+pred_horiz = 7
 
-
-best_ind, best_fit = run_ga(
-    population_size,
-    num_generations,
-    Temp_lst,
-    DO_lst,
-    total_days_GA,
-    pred_horiz_GA,
-    feeding_list_GA,
-    w0,
-    TAN0,
+weights, feeds, applied_plan, profit_lst, tan_lst = MPC(
+    total_days=30,
+    pred_horiz=7,
+    feeding_lst=feed_lst,
+    T_lst=Temp_lst,
+    DO_lst=DO_lst,
+    initial_weight=w0,
+    initial_Tan=TAN0,
+    population_size=30,
+    num_gens=10,
+    stop=False
 )
-
-opt_T = best_ind[0]
-opt_DO= best_ind[1]
-
-weights, feeds, profit_lst, tan_lst = MPC(
-    total_days, pred_horiz, feeding_list, opt_T, opt_DO, w0, TAN0, False
-        )
 
 # =========================================================================
 # Plots 
@@ -66,7 +49,7 @@ fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 # 1. Weight Plot
 ax1.plot(range(len(weights)), weights, label='Weight', color='blue')
 ax1.set_ylabel('Weight (kg)')
-ax1.set_title(f'Simulation Results ({total_days} Days), T = ({opt_T:.2f}), DO = ({opt_DO:.2f})')
+ax1.set_title(f'Simulation Results ({total_days} Days)')
 ax1.grid(True)
 ax1.legend()
 
@@ -77,8 +60,8 @@ ax2.grid(True)
 ax2.legend()
 
 # 3. Feed Plot
-ax3.plot(range(len(feeds)), feeds, label='Feed Ratio', color='red')
-ax3.set_ylabel('Feed (fraction of BW)')
+ax3.plot(feeds, label='Feed (kg/day)',color='red')
+ax3.set_ylabel('Feed (kg/day)')
 ax3.grid(True)
 ax3.legend()
 
