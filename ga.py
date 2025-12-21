@@ -51,7 +51,7 @@ def fit_evaluation(population, initial_weight, initial_tan):
     fitness_lst = []
     
     for ind in population:
-        weights, feeds, tan_lst, Ts, DOs = run_sim(ind, initial_weight, initial_tan)
+        weights, feeds, tan_lst, no3_lst, Ts, DOs = run_sim(ind, initial_weight, initial_tan)
         profit_ind = profit(weights[-1], weights[0], feeds, Ts, DOs, len(ind))
         fitness_lst.append(profit_ind)
 

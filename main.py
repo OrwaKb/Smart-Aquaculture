@@ -22,12 +22,12 @@ feed_lst = np.arange(feed_min, feed_max, 0.0025)
 
 w0   = 0.005    # initial weight in kg
 
-total_days = 40
+total_days = 200
 pred_horiz = 7
 population_size = 50
 num_gens = 50  
 
-weights, feeds, applied_plan, profit_lst, tan_lst, feed_prec = MPC(
+weights, feeds, applied_plan, profit_lst, tan_lst, no3_lst, feed_prec = MPC(
     total_days,
     pred_horiz,
     feed_lst,
@@ -44,7 +44,7 @@ weights, feeds, applied_plan, profit_lst, tan_lst, feed_prec = MPC(
 # Plots 
 # =========================================================================
 
-fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
+fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(10, 18), sharex=True)
 
 # 1. Weight Plot
 ax1.plot(range(len(weights)), weights, label='Weight', color='blue')
@@ -74,6 +74,13 @@ ax4.set_ylabel('TAN / UIA')
 ax4.set_xlabel('Time (days)')
 ax4.grid(True)
 ax4.legend()
+
+ax5.plot(range(len(no3_lst)), no3_lst, label='Nitrate (mg/L)', color='brown')
+ax5.plot([0, len(no3_lst)], [NO3_crit, NO3_crit], 'r--', label='Critical Limit')
+ax5.set_ylabel('Nitrate (mg/L)')
+ax5.set_xlabel('Time (days)')
+ax5.grid(True)
+ax5.legend()
 
 plt.tight_layout()
 plt.show()
