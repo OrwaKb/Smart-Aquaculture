@@ -1,6 +1,5 @@
 """
 Model Predictive Control (MPC) with Genetic Algorithm (GA)
-for optimal temperature and dissolved oxygen selection.
 
 @author: Orwa Kblawe
 Date: Nov 2025
@@ -21,22 +20,23 @@ DO_lst   = np.arange(DO_min, DO_max, 0.1)
 Temp_lst = np.arange(T_min, T_max, 0.5)
 feed_lst = np.arange(feed_min, feed_max, 0.0025)
 
-TAN0 = 0.01    # initial TAN
-w0   = 0.05    # initial weight in kg
+w0   = 0.005    # initial weight in kg
 
-total_days = 200
+total_days = 40
 pred_horiz = 7
+population_size = 50
+num_gens = 50  
 
-weights, feeds, applied_plan, profit_lst, tan_lst = MPC(
-    total_days=30,
-    pred_horiz=7,
-    feeding_lst=feed_lst,
-    T_lst=Temp_lst,
-    DO_lst=DO_lst,
-    initial_weight=w0,
-    initial_Tan=TAN0,
-    population_size=30,
-    num_gens=10,
+weights, feeds, applied_plan, profit_lst, tan_lst, feed_prec = MPC(
+    total_days,
+    pred_horiz,
+    feed_lst,
+    Temp_lst,
+    DO_lst,
+    w0,
+    TAN0,
+    population_size,
+    num_gens,
     stop=False
 )
 
@@ -49,7 +49,7 @@ fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 15), sharex=True)
 # 1. Weight Plot
 ax1.plot(range(len(weights)), weights, label='Weight', color='blue')
 ax1.set_ylabel('Weight (kg)')
-ax1.set_title(f'Simulation Results ({total_days} Days)')
+ax1.set_title(f'Simulation Results ({total_days} Days, feed price:{p_feed}, fish price: {p_fish})')
 ax1.grid(True)
 ax1.legend()
 

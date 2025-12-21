@@ -17,12 +17,23 @@ def generate_genome(first_lst: list, second_lst: list, third_lst: list):
     return rand.choice(first_lst), rand.choice(second_lst), rand.choice(third_lst)
 
 
-def generate_population(size: int, horizon: int, first_lst: list, second_lst: list, third_lst: list):
+def generate_population(size: int, horizon: int, first_lst: list, second_lst: list, third_lst: list, seed_ind=None):
     """ Generate a population of candidate solutions using the predefined generate_genome function.
     * 7 because we want to solutins for the prediction horizen all at a time. change number to word later """
-    population = []
+    #population = []
 
-    for _ in range(size): 
+    #for _ in range(size): 
+        #population.append([generate_genome(first_lst, second_lst, third_lst) for _ in range(horizon)]) 
+     
+    #return population
+    population = []
+    
+    # If we have a seed (previous best solution), add it to the population
+    if seed_ind is not None:
+        population.append(seed_ind)
+
+    # Fill the rest with random individuals
+    while len(population) < size: 
         population.append([generate_genome(first_lst, second_lst, third_lst) for _ in range(horizon)]) 
      
     return population
@@ -118,9 +129,9 @@ def mutate(ind,
     return new_ind
 
 
-def run_ga(pop_size, num_gens, horizon, feed_lst, temp_lst, do_lst, w0, TAN0):
+def run_ga(pop_size, num_gens, horizon, feed_lst, temp_lst, do_lst, w0, TAN0, seed_ind=None):
 
-    population = generate_population(pop_size, horizon, feed_lst, temp_lst, do_lst)
+    population = generate_population(pop_size, horizon, feed_lst, temp_lst, do_lst, seed_ind)
 
     best_ind = None
     best_fit = -np.inf

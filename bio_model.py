@@ -38,19 +38,29 @@ def v(x: float) -> float:
 
 def BF_capacity(TAN_prev: float) -> float:
     """Biofilter capacity BF_{t-1}."""
+    TAN_prev = max(0.0, TAN_prev)
+
     return n_BF * (TAN_prev ** k_BF)
 
 
 def update_TAN(TAN_prev: float, feed_kg: float) -> float:
-    """Update TAN based on previous TAN and feed amount (kg)."""
-    feed_g = feed_kg * 1000.0  # convert to grams
+    """Update TAN based on previous TAN and feed amount (kg).
+    production of TAN P77"""
 
-    input_term   = (Nf * feed_g) / V_water
+    TAN_current = ((feed_kg * PC * 0.094) * 1000) / V_water  + max(0,TAN_prev)      # total ammonia produced as a result of food in [mg/L]
+
+    r_N_capacity = ((n_BF * (TAN_current ** k_BF)) * V_BF) * 1000 / V_water            # conversion rate multiplyed by biofilter volume devided by tank volume
+    r_N_actual = min(r_N_capacity, TAN_current)
+
+    TAN_next = TAN_current - r_N_actual                                             # TAN remained is 
+    return max(TAN_next,0)                                                          # returns the current value of TAN
+
+    input_term   = (1.0 - NPU) * (PC / 6.25) * feed_kg
     BF_prev      = BF_capacity(TAN_prev)
     removal_term = (BF_prev * V_BF) / V_water
 
     TAN_next = TAN_prev + input_term - removal_term
-    return max(TAN_next, 0.0)
+    return TAN_next
 
 
 def TAN_to_UIA(TAN: float) -> float:
@@ -61,8 +71,7 @@ def TAN_to_UIA(TAN: float) -> float:
     """
     UIA = TAN / (1 + 10**(PK_a - PH))
     return max(UIA, 0.0)
-    #return TAN * frac_UIA
-
+    
 
 def dwdt(t: float, w: float, UIA: float, f: float, T: float, DO: float) -> float:
     """
@@ -157,11 +166,11 @@ def profit(w_final: float,
         T = float(np.asarray(T).squeeze())
         DO = float(np.asarray(DO).squeeze())
 
-        heat_flux = area * 12.12 * max(0.0, T - T_env)
+        heat_flux = area * 12.12 * max(0.0, T - T_env) / N_fish
         heat_cost += (heat_flux / 1000.0) * electricity_price * 24.0
 
         DO_extra = max(0.0, DO - DO_base)
-        DO_cost += ((DO_extra / 1000.0) / 0.46) * electricity_price * 24.0
+        DO_cost += ((DO_extra / 1000.0 / 24) / 0.46) * electricity_price * 24.0
 
     electricity_cost = (heat_cost + DO_cost) / N_fish # for now we divide by 100 to make this system for one fish
 

@@ -3,7 +3,6 @@ from bio_model import dwdt, TAN_to_UIA, update_TAN, profit
 from ga import run_ga
 from params import *
 from scipy.integrate import solve_ivp
-import numpy as np
 
 # =========================================================================
 # MPC Function
@@ -18,20 +17,32 @@ def MPC(total_days, pred_horiz, feeding_lst, T_lst, DO_lst,
     weights      = [float(initial_weight)]
     tan_lst      = [float(initial_Tan)]
     feeds_kg     = []
+    feed_prec    = []
     applied_plan = []   # store applied (F,T,DO) each day
     profit_cum   = []
     t_span       = (0.0, 1.0)
+
+    prev_best_ind = None # Initialize variable to store previous plan
 
     for day in range(total_days):
 
         w_current   = float(weights[-1])
         TAN_current = float(tan_lst[-1])
 
+        seed_ind = None
+        if prev_best_ind is not None:
+            # Shift the plan: Drop Day 0, keep Day 1-6
+            seed_ind = prev_best_ind[1:] 
+            # We need to add a new guess for the new "last day" of the horizon
+            # We can just duplicate the last known good move
+            seed_ind.append(prev_best_ind[-1])
+
         # Run GA
         best_ind, best_fit = run_ga(
             population_size, num_gens, pred_horiz,
             feeding_lst, T_lst, DO_lst,
-            w_current, TAN_current
+            w_current, TAN_current, 
+            seed_ind=seed_ind
         )
 
         # Apply only day-0 action
@@ -53,19 +64,24 @@ def MPC(total_days, pred_horiz, feeding_lst, T_lst, DO_lst,
 
         w_end = float(sol.y[0, -1])
 
+        # Save this result for the next loop iteration
+        prev_best_ind = best_ind
+
         # feed in kg/day 
         feed_kg = float(F0 * w_current)
+
         TAN_next = float(update_TAN(TAN_current, feed_kg))
 
         # daily + cumulative profit
         daily_profit = float(profit(w_end, w_current, [feed_kg], [T0], [DO0], 1))
-        cum = (profit_cum[-1] if profit_cum else 0.0) + daily_profit
+        cumulative_prof = (profit_cum[-1] if profit_cum else 0.0) + daily_profit
 
         # commit day
         weights.append(w_end)
         tan_lst.append(TAN_next)
         feeds_kg.append(feed_kg)
-        profit_cum.append(cum)
+        feed_prec.append(F0)
+        profit_cum.append(cumulative_prof)
 
         # check constraint
         if TAN_to_UIA(TAN_next) > UIA_crit:
@@ -76,7 +92,7 @@ def MPC(total_days, pred_horiz, feeding_lst, T_lst, DO_lst,
 
         print(f"Day {day}: F={F0:.4f}, T={T0:.2f}, DO={DO0:.2f}, w={w_end:.4f}, profit={daily_profit:.4f}")
 
-    return weights, feeds_kg, applied_plan, profit_cum, tan_lst
+    return weights, feeds_kg, applied_plan, profit_cum, tan_lst, feed_prec
 
         
 #==============================================================================================
