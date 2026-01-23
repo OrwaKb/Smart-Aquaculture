@@ -2,39 +2,33 @@
 from params import *
 import numpy as np
 import random as rand
-from bio_model import run_sim, profit
+from bio_model import run_sim, profit, TAN_to_UIA
 
 # =========================================================================
 # Genetic Algorithm – temperature & DO optimization
 # =========================================================================
 
 
-def generate_genome(first_lst: list, second_lst: list, third_lst: list):
+def generate_genome(first_lst: list, second_lst: list, third_lst: list, fourth_lst:list):
     """
-    Generate a candidate solution (T, DO) by random choice
+    Generate a candidate solution (feed,T,DO,Q) by random choice
     from the provided discrete lists.
     """
-    return rand.choice(first_lst), rand.choice(second_lst), rand.choice(third_lst)
+    return rand.choice(first_lst), rand.choice(second_lst), rand.choice(third_lst), rand.choice(fourth_lst)
 
 
-def generate_population(size: int, horizon: int, first_lst: list, second_lst: list, third_lst: list, seed_ind=None):
+def generate_population(size: int, horizon: int, first_lst: list, second_lst: list, third_lst: list, fourth_lst: list, seed_ind=None):
     """ Generate a population of candidate solutions using the predefined generate_genome function.
     * 7 because we want to solutins for the prediction horizen all at a time. change number to word later """
-    #population = []
-
-    #for _ in range(size): 
-        #population.append([generate_genome(first_lst, second_lst, third_lst) for _ in range(horizon)]) 
-     
-    #return population
     population = []
-    
+
     # If we have a seed (previous best solution), add it to the population
     if seed_ind is not None:
         population.append(seed_ind)
 
     # Fill the rest with random individuals
     while len(population) < size: 
-        population.append([generate_genome(first_lst, second_lst, third_lst) for _ in range(horizon)]) 
+        population.append([generate_genome(first_lst, second_lst, third_lst, fourth_lst) for _ in range(horizon)]) 
      
     return population
 
@@ -51,8 +45,56 @@ def fit_evaluation(population, initial_weight, initial_tan):
     fitness_lst = []
     
     for ind in population:
-        weights, feeds, tan_lst, no3_lst, Ts, DOs = run_sim(ind, initial_weight, initial_tan)
-        profit_ind = profit(weights[-1], weights[0], feeds, Ts, DOs, len(ind))
+        weights, feeds, tan_lst, no3_lst, co2_lst, Ts, DOs, Qs = run_sim(ind, initial_weight, initial_tan)
+        profit_ind = profit(weights[-1], weights[0], feeds, Ts, DOs, Qs,len(ind))
+
+        # ================ Nitrate Penalty ====================================
+
+        NO3_soft = 0.7 * NO3_crit
+        lam_no3 = 1e6  # tune
+
+        for n in no3_lst:
+            if n > NO3_soft:
+                profit_ind -= lam_no3 * (n - NO3_soft)**2
+
+
+        # ================ CO2 Penalty ========================================
+
+        CO2_soft = 0.7 * CO2_crit
+        lam_co2 = 1e1  # for tuning
+
+        for c in co2_lst:
+            if c > CO2_soft:
+                profit_ind -= lam_co2 * (c - CO2_soft)**2
+
+        # ================ UIA Penalty ========================================
+
+        #uia_lst = [TAN_to_UIA(t) for t in tan_lst]
+        
+        #uia_soft = 0.7 * UIA_crit
+        #lam_uia  = 5e2  # for tuning
+
+        #for u in uia_lst:
+            #if u > UIA_max:
+                #profit_ind -= 1e8
+
+            #elif u > uia_soft:
+                #profit_ind -= lam_uia * (u - uia_soft)**2
+
+        # ================ TAN Penalty ========================================
+
+        #TAN_soft = 3.0     
+        #TAN_hard = 6.0    
+        #lam_tan  = 1e1     
+
+        #for t in tan_lst:
+            #if t > TAN_hard:
+                #profit_ind -= 1e4
+            #elif t > TAN_soft:
+                #profit_ind -= lam_tan * (t - TAN_soft)**2
+
+        # =====================================================================
+
         fitness_lst.append(profit_ind)
 
     return fitness_lst
@@ -79,18 +121,32 @@ def crossover(p1, p2, crossover_rate: float = 0.9):
         return p1[:], p2[:]  # copies
 
     c1, c2 = [], []
-    for (F1, T1, DO1), (F2, T2, DO2) in zip(p1, p2):
-        blend_fac = rand.random()
-        c1.append((
-            blend_fac*F1 + (1-blend_fac)*F2,
-            blend_fac*T1 + (1-blend_fac)*T2,
-            blend_fac*DO1 + (1-blend_fac)*DO2
-        ))
-        c2.append((
-            blend_fac*F2 + (1-blend_fac)*F1,
-            blend_fac*T2 + (1-blend_fac)*T1,
-            blend_fac*DO2 + (1-blend_fac)*DO1
-        ))
+    for (F1, T1, DO1, Q1), (F2, T2, DO2, Q2) in zip(p1, p2):
+        blend = rand.random()
+        F = blend*F1 + (1-blend)*F2
+        T = blend*T1 + (1-blend)*T2
+        DO = blend*DO1 + (1-blend)*DO2
+        Q = blend*Q1 + (1-blend)*Q2
+
+        F = min(max(F, feed_min), feed_max)
+        T = min(max(T, T_min), T_max)
+        DO = min(max(DO, DO_min), DO_max)
+        Q = min(max(Q, Q_water_min), Q_water_max)
+
+        c1.append((F, T, DO, Q))
+
+        F = blend*F2 + (1-blend)*F1
+        T = blend*T2 + (1-blend)*T1
+        DO = blend*DO2 + (1-blend)*DO1
+        Q = blend*Q2 + (1-blend)*Q1
+
+        F = min(max(F, feed_min), feed_max)
+        T = min(max(T, T_min), T_max)
+        DO = min(max(DO, DO_min), DO_max)
+        Q = min(max(Q, Q_water_min), Q_water_max)
+
+        c2.append((F, T, DO, Q))
+        
     return c1, c2
 
 
@@ -98,9 +154,11 @@ def mutate(ind,
            mut_rate_T: float = 0.2,
            mut_rate_DO: float = 0.2,
            mut_rate_f: float = 0.2,
+           mut_rate_Q: float = 0.2,
            std_T: float = 0.1,
            std_DO: float = 0.1,
-           std_f: float = 0.001):
+           std_f: float = 0.01,
+           std_Q: float = 0.05):
     """
     Mutation operator for a HORIZON individual.
     ind is a list of daily tuples: [(feed, T, DO), (feed, T, DO), ...]
@@ -110,7 +168,7 @@ def mutate(ind,
     new_ind = []
 
     for day_gene in ind:
-        feed, T, DO = day_gene
+        feed, T, DO, Q = day_gene
 
         if rand.random() < mut_rate_T:
             T += rand.gauss(0, std_T)
@@ -118,20 +176,23 @@ def mutate(ind,
             DO += rand.gauss(0, std_DO)
         if rand.random() < mut_rate_f:
             feed += rand.gauss(0, std_f)
+        if rand.random() < mut_rate_Q:
+            Q += rand.gauss(0, std_Q)
 
         # clip to bounds
         T = min(max(T, T_min), T_max)
         DO = min(max(DO, DO_min), DO_max)
         feed = min(max(feed, feed_min), feed_max)
+        Q = min(max(Q, Q_water_min), Q_water_max)
 
-        new_ind.append((feed, T, DO))
+        new_ind.append((feed, T, DO, Q))
 
     return new_ind
 
 
-def run_ga(pop_size, num_gens, horizon, feed_lst, temp_lst, do_lst, w0, TAN0, seed_ind=None):
+def run_ga(pop_size, num_gens, horizon, feed_lst, temp_lst, do_lst, q_water_lst, w0, TAN0, seed_ind=None):
 
-    population = generate_population(pop_size, horizon, feed_lst, temp_lst, do_lst, seed_ind)
+    population = generate_population(pop_size, horizon, feed_lst, temp_lst, do_lst, q_water_lst, seed_ind)
 
     best_ind = None
     best_fit = -np.inf
@@ -159,7 +220,7 @@ def run_ga(pop_size, num_gens, horizon, feed_lst, temp_lst, do_lst, w0, TAN0, se
         population = new_pop
 
         # print day-0 decision 
-        F0, T0, DO0 = best_ind[0]
+        F0, T0, DO0, Q0 = best_ind[0]
         #print(f"Gen {gen}: best_fit={best_fit:.4f}, day0: F={F0:.4f}, T={T0:.2f}, DO={DO0:.2f}")
 
     return best_ind, best_fit
