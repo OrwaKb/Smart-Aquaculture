@@ -10,7 +10,8 @@ b        = 0.62
 a        = 0.53             
 m        = 0.87
 n        = 0.78
-k        = 1.2
+
+k        = 4.6
 
 T_min    = 24
 T_opt    = 33         # intrinsic optimal temperature used in tao(T)

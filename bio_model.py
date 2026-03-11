@@ -8,6 +8,7 @@ import numpy as np
 # Biological / MPC equations
 # =========================================================================
 
+
 def tao(t: float) -> float:
     """Temperature effect τ(T)."""
     if t > T_opt:
@@ -33,13 +34,6 @@ def v(x: float) -> float:
     if UIA_crit < x < UIA_max:
         return (UIA_max - x) / (UIA_max - UIA_crit)
     return 0.0
-
-
-#def BF_capacity(TAN_prev: float) -> float:
-  #  """Biofilter capacity BF_{t-1}."""
-  #  TAN_prev = max(0.0, TAN_prev)
-
-  #  return n_BF * (TAN_prev ** k_BF)
 
 
 def phi(co2: float) -> float:
@@ -157,7 +151,8 @@ def run_sim(ind, initial_weight, initial_Tan, initial_Nitrate=0.0, initial_CO2 =
         # Update TAN, feed and nitrate
         feed_kg = current_feed * w_current
         tan_tmp, no3_tmp, co2_tmp= update_water_quality(tan_tmp, no3_tmp,
-                                                         co2_tmp, feed_kg, current_Q)
+                                                         co2_tmp, feed_kg, 
+                                                         current_Q)
         
         tan_lst.append(tan_tmp)
         no3_lst.append(no3_tmp)
@@ -227,7 +222,5 @@ def profit(w_final: float,
     total_cost = feed_cost + heat_cost + DO_cost + water_cost
     
     return revenue - total_cost
-
-
 
 #========================================================================================

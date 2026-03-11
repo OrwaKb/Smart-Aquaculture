@@ -12,7 +12,7 @@ import params
 from mpc import MPC
 import bio_model
 #from bio_model import TAN_to_UIA, run_sim
-
+from ga_calibration import run_ga
 # =========================================================================
 # Main
 # =========================================================================
@@ -107,104 +107,133 @@ plt.show()
 # =========================================================================
 '''
 
-DO_const = 6
-Q_const = 0.6
+inp1 = input("Cal / Test => ")
 
-T_arr = [24]*70 + [27]*126
-Data_days = [0, 2, 22, 29, 36, 56, 63, 78, 84, 91, 105, 112, 120, 155, 168, 177, 190, 196]
+if inp1 == "Test":
 
-# ==== Tuning parameters =====
+    DO_const = 6
+    Q_const = 0.6
+    T_arr = [24]*70 + [27]*126
+    Data_days = [0, 2, 22, 29, 36, 56, 63, 78, 84, 91, 105, 112, 120, 155, 168, 177, 190, 196]
 
-bio_model.h = 0.5      #  
-bio_model.p = 1.5      
-bio_model.b = 0.62
-bio_model.a = 0.53             
-bio_model.m = 0.9     #
-bio_model.n = 0.7    #
-bio_model.k = 1.2      #
+    # ===== Calibrated parameters =====
+    calib_params = {
+        "m": 1.31,
+        "n": 2.84,
+        "h": 0.89,
+        "j": 0.027,
+        "k_min": 0.0029,
+        "k": 4.41,
+        "T_opt":17.84,
+        "T_min":25.7,
+        "T_max":33.23
+    }
 
-# ==== Tank A - Calibration ===============================================
-#'''
-N_fish = 66
+    # ===== Old / stock system parameters =====
+    old_params = {
+        "m": 0.67,
+        "n": 0.81,
+        "h": 0.8,
+        "j": 0.0132,
+        "k_min": 0.00133,
+        "k": 4.6,
+        "T_opt": 33,
+        "T_min":24,
+        "T_max":40
+    }
 
-Feed_arr = [70]*23 + [115]*55 + [129]*6 + [117]*7 + [187]*14 + [124]*7 + [131]*8 + [168]*35 + [208]*13 + [160]*9 + [161]*13 + [168]*6
+    # ===== Tanks =====
+    tanks = {
+        "A": {
+            "N_fish": 66,
+            "Feed_arr": [70]*23 + [115]*55 + [129]*6 + [117]*7 + [187]*14 + [124]*7 + [131]*8 + [168]*35 + [208]*13 + [160]*9 + [161]*13 + [168]*6,
+            "Data": [14, 14.2, 16, 17.35, 17.9, 20.84, 20.68, 28.8, 25.8, 26, 30, 32, 33.2, 42, 39.7, 40.4, 43, 41.7]
+        },
+        "B": {
+            "N_fish": 40,
+            "Feed_arr": [100]*23 + [185]*55 + [201]*6 + [187]*7 + [52]*14 + [57.16]*7 + [53]*8 + [62]*35 + [63]*13 + [68]*9 + [70]*13 + [70]*6,
+            "Data": [49.8, 61, 61.8, 64.4, 72.1, 75.85, 75.4, 84.1, 78.2, 80, 88.5, 78.5, 86, 89.5, 93.25, 97, 96.9, 98.9]
+        },
+        "D": {
+            "N_fish": 40,
+            "Feed_arr": [100]*23 + [185]*55 + [214]*6 + [217]*7 + [320]*14 + [182]*7 + [181]*8 + [235]*35 + [255]*13 + [252]*9 + [255]*13 + [257]*6,
+            "Data": [59.2, 57.1, 61.8, 67.7, 70, 76.5, 77.6, 89.27, 90.7, 100, 91.6, 91.12, 98, 106, 103.4, 105, 107.2, 108.9]
+        }
+    }
 
-Data = [14, 14.2, 16, 17.35, 17.9, 20.84, 20.68, 28.8, 25.8, 26, 30, 32, 33.2, 42, 39.7, 40.4, 43, 41.7]
-#'''
-# ==== Tank B - Validation =================================================
-'''
-N_fish = 40
+    fig, axes = plt.subplots(3, 1, figsize=(10, 18), sharex=True)
 
-Feed_arr = [100]*23 + [185]*55 + [201]*6 + [187]*7 + [52]*14 + [57.16]*7 + [53]*8 + [62]*35 + [63]*13 + [68]*9 + [70]*13 + [70]*6
+    for ax, (tank_name, tank) in zip(axes, tanks.items()):
+        N_fish = tank["N_fish"]
+        Feed_arr = tank["Feed_arr"]
+        Data = tank["Data"]
 
-Data = [49.8, 61, 61.8, 64.4, 72.1, 75.85, 75.4, 84.1, 78.2, 80, 88.5, 78.5, 86, 89.5, 93.25, 97, 96.9, 98.9]
+        w_init = Data[0] / 1000.0
 
-#'''
-# ==== Tank D - Validation =================================================
-'''
-N_fish = 40
+        days = np.arange(196)
+        weights_measured_interp = np.interp(days, Data_days, Data)
 
-Feed_arr = [100]*23 + [185]*55 + [214]*6 + [217]*7 + [320]*14 + [182]*7 + [181]*8 + [235]*35 + [255]*13 + [252]*9 + [255]*13 + [257]*6
+        # step-like estimated measured weights
+        weights_measured_step = []
+        i = 0
+        for kk in range(len(Data_days) - 1):
+            gap = Data_days[kk + 1] - Data_days[kk]
+            for _ in range(gap):
+                weights_measured_step.append(Data[i])
+            i += 1
 
-Data = [59.2, 57.1, 61.8, 67.7, 70, 76.5, 77.6, 89.27, 90.7, 100, 91.6, 91.12, 98, 106, 103.4, 105, 107.2, 108.9]
-#'''
-# ==========================================================================
+        W_est = np.array(weights_measured_step[:196], dtype=float) / 1000.0
 
-w_init = Data[0] / 1000.0
+        feed_total_kg_per_fish = (np.array(Feed_arr, dtype=float) / 1000.0) / N_fish
+        feed_ratio = feed_total_kg_per_fish / W_est
 
-days = np.arange(196)
-weights_measured = np.interp(days, Data_days, Data) 
+        ind = [(float(feed_ratio[d]), float(T_arr[d]), float(DO_const), float(Q_const)) for d in range(196)]
 
-feed_ratios = [Feed_arr[i] / (weights_measured[i] * N_fish )for i in range(len(weights_measured))]
+        # ===== Run calibrated model =====
+        for name, value in calib_params.items():
+            setattr(bio_model, name, value)
 
-weights_measured = []
-i = 0
-for k in range(len(Data_days)-1):
-    days = Data_days[k+1] - Data_days[k]
-    for _ in range(days):
-        weights_measured.append(Data[i])
-    i += 1
+        weights, feeds_kg, tan_lst, no3_lst, co2_lst, temps, DOs, Q_waters = bio_model.run_sim(
+            ind, w_init, params.TAN0
+        )
+        weights = np.array(weights, dtype=float)
 
-W_est = np.array(weights_measured[:196], dtype=float) / 1000.0
+        # ===== Run old model =====
+        for name, value in old_params.items():
+            setattr(bio_model, name, value)
 
-feed_total_kg_per_fish = (np.array(Feed_arr, dtype=float) / 1000.0) / N_fish
-feed_ratio = feed_total_kg_per_fish / W_est   
+        weights_old, feeds_kg, tan_lst, no3_lst, co2_lst, temps, DOs, Q_waters = bio_model.run_sim(
+            ind, w_init, params.TAN0
+        )
+        weights_old = np.array(weights_old, dtype=float)
 
-ind = [(float(feed_ratio[d]), float(T_arr[d]), float(DO_const), float(Q_const)) for d in range(196)]
+        # ===== Plot =====
+        days_sim = np.arange(len(weights))
+        Data_g = np.array(Data, dtype=float)
 
-weights, feeds_kg, tan_lst, no3_lst, co2_lst, temps, DOs, Q_waters = bio_model.run_sim(ind, w_init, params.TAN0)
+        ax.plot(days_sim, weights * 1000, label="Calibrated Simulated weight (g)")
+        ax.plot(days_sim, weights_old * 1000, "r--", label="Non-Calibrated Simulated weight (g)")
+        ax.plot(Data_days, Data_g, "o", label="Measured mean weight (g)")
 
-weights = np.array(weights, dtype=float)   
-days_sim = np.arange(len(weights))
-calibrated= days_sim          
-Data_g = np.array(Data, dtype=float)
-Data_kg = Data_g * 1000.0
+        ax.set_title(f"Tank {tank_name}: Simulated vs Measured")
+        ax.set_ylabel("Mean fish weight (g)")
+        ax.grid(True)
+        ax.legend()
 
-# ===== The Stock System =====
+    axes[-1].set_xlabel("Day")
+    plt.tight_layout()
+    plt.show()
 
-bio_model.h  = 0.8        
-bio_model.p  = 1.5
-bio_model.b  = 0.62
-bio_model.a  = 0.53             
-bio_model.m  = 0.67
-bio_model.n  = 0.81
-bio_model.k  = 4.6
+#=================================================
 
-weights_old, feeds_kg, tan_lst, no3_lst, co2_lst, temps, DOs, Q_waters = bio_model.run_sim(ind, w_init, params.TAN0)
-weights_old = np.array(weights_old, dtype=float) 
-# ===========================
+elif inp1 == "Cal":
+    best_params, best_err = run_ga(
+        pop_size=80,
+        num_gens=100,
+    )
 
-plt.figure(figsize=(10,6))
-plt.plot(calibrated, weights * 1000, label="Calibrated Simulated weight (g)")
-plt.plot(calibrated, weights_old * 1000,'r--', label="Non-Calibrated Simulated weight (g)")
-plt.plot(Data_days, Data_g, "o", label="Measured mean weight (g)")
-plt.xlabel("Day")
-plt.ylabel("Mean fish weight (g)")
-plt.title("Simulated vs Measured")
-plt.grid(True)
-plt.legend()
-plt.show()
-
+    print("Best params:", best_params)
+    print("Best error:", best_err)
 
 # =========================================================================
 # End Calibration & Validation
