@@ -8,9 +8,11 @@ import numpy as np
 # Biological / MPC equations
 # =========================================================================
 
+# =========================== Growth Equation Taken from the paper =================================
 
 def tao(t: float) -> float:
-    """Temperature effect τ(T)."""
+    """Temperature effect τ(T). 
+    From paper"""
     if t > T_opt:
         return math.exp(-k * ((t - T_opt) / (T_max - T_opt))**4)
     if t < T_opt:
@@ -19,7 +21,8 @@ def tao(t: float) -> float:
 
 
 def segma(x: float) -> float:
-    """Dissolved oxygen limitation function σ(DO)."""
+    """Dissolved oxygen limitation function σ(DO).
+    paper"""
     if x >= DO_crt:
         return 1.0
     if DO_min < x < DO_crt:
@@ -28,7 +31,8 @@ def segma(x: float) -> float:
 
 
 def v(x: float) -> float:
-    """Unionized ammonia effect v(UIA)."""
+    """Unionized ammonia effect v(UIA).
+    paper"""
     if x < UIA_crit:
         return 1.0
     if UIA_crit < x < UIA_max:
@@ -36,8 +40,36 @@ def v(x: float) -> float:
     return 0.0
 
 
+def dwdt(t: float, w: float, UIA: float, f: float, T: float, DO: float) -> float:
+    """
+    Main growth ODE: dw/dt as a function of weight, UIA and feed ratio.
+    f is feeding ratio (fraction of body weight per day).
+    Equation taken from "MPC paradigms for fish growth reference tracking in precision 
+    aquaculture" research paper, we are treating p as a constant (0<p<2).
+    """
+    w = max(w, 0.0000001)
+    growth = h * p * f * b * (1 - a) * tao(T) * 1 * 1 * w**m   #segma(DO) = 1, v(UIA) = 1 for calibration
+    loss   = k_min * math.exp(j * (T - T_min)) * w**n
+    return growth - loss
+
+# =======================================================================================
+#                     Water Quality Equations - Yellow Book
+# =======================================================================================
+
+def ammonia(TAN: float) -> float:
+    """
+    Ammonia caclulation from page 42
+    """
+    pKa = PK_a # for now its a const
+    pH = PH_cons # for now
+    NH3_N = TAN / (1 + 10 ** (pKa - pH))
+    
+    return NH3_N
+
+
 def phi(co2: float) -> float:
-    """CO2 limit function"""
+    """CO2 limit function
+    UNUSED!!!! + I dont know where its from"""
     if co2 < CO2_crit:
         return 1.0
     if CO2_crit <= co2 < CO2_max:
@@ -45,19 +77,30 @@ def phi(co2: float) -> float:
     return 0.0
 
 
+def CO2(ALK: float, pH: float) -> float:
+    """
+    CO2 consentration (mg/L) approximation (5-10%), page 51
+    Unused
+    """
+    ALK = Alk # const for now
+    C_CO2 = ALK * 10**(6.3 - pH)
+    
+    return C_CO2
+
+
 def update_water_quality(TAN_prev: float, NO3_prev: float, CO2_prev, feed_kg: float, Q_water: float) -> tuple:
     """
-    Update TAN and Nitrate based on feed and biofilter performance.
-    Returns: (TAN_next, NO3_next)
+    
     """
     total_feed = feed_kg * N_fish   #scaling up for the whole tank (?)
    
     TAN_pool = ((total_feed * PC * 0.094) * 1000 ) / V_water + max(0.0, TAN_prev) 
-
+    
     # Removal Capacity
-    r_N_capacity = ((n_BF * (TAN_pool ** k_BF)) * V_BF) / V_water #was times 1000
+    # Added max(0.0, TAN_pool) to prevent negative float errors in scalar power
+    r_N_capacity = ((n_BF * (max(0.0, TAN_pool) ** k_BF)) * V_BF) / V_water
     r_N_actual = min(r_N_capacity, TAN_pool)
-
+    
     TAN_bio = max(TAN_pool - r_N_actual, 0.0)
     
     # Update Nitrate
@@ -84,27 +127,11 @@ def update_water_quality(TAN_prev: float, NO3_prev: float, CO2_prev, feed_kg: fl
     CO2_next = CO2_bio * (1 - dilution_factor) + CO2_fresh * dilution_factor
 
     return TAN_next, NO3_next, CO2_next
+   
 
-
-def TAN_to_UIA(TAN: float) -> float:
-    """
-    Compute UIA (unionized ammonia) from TAN using pH and pKa:
-        UIA = TAN / (1 + 10^(pKa - pH))
-    Based on M. Saadi's code.
-    """
-    UIA = TAN / (1 + 10**(PK_a - PH))
-    return max(UIA, 0.0)
-    
-
-def dwdt(t: float, w: float, UIA: float, f: float, T: float, DO: float, co2: float) -> float:
-    """
-    Main growth ODE: dw/dt as a function of weight, UIA and feed ratio.
-    f is feeding ratio (fraction of body weight per day).
-    """
-    growth = h * p * f * b * (1 - a) * tao(T) * segma(DO) * v(UIA) * w**m   
-    loss   = k_min * math.exp(j * (T - T_min)) * w**n
-    return growth - loss
-
+# =======================================================================================
+#                           Simulation function
+# =======================================================================================
 
 def run_sim(ind, initial_weight, initial_Tan, initial_Nitrate=0.0, initial_CO2 = 0.5):
     
@@ -128,7 +155,7 @@ def run_sim(ind, initial_weight, initial_Tan, initial_Nitrate=0.0, initial_CO2 =
         no3_tmp        = no3_lst[-1]
         co2_tmp        = co2_lst[-1]
 
-        UIA_current = TAN_to_UIA(tan_tmp)
+        UIA_current = ammonia(tan_tmp)
 
         current_feed = feeds[day]
         current_temp = temps[day]
@@ -136,7 +163,7 @@ def run_sim(ind, initial_weight, initial_Tan, initial_Nitrate=0.0, initial_CO2 =
         current_Q    = Q_waters[day]
 
         sol = solve_ivp(
-            lambda t, w: dwdt(t, w, UIA_current, current_feed, current_temp, current_DO, co2_tmp),
+            lambda t, w: dwdt(t, w, UIA_current, current_feed, current_temp, current_DO),
             t_span,
             [w_current],
             t_eval=[t_span[1]]

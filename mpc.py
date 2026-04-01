@@ -1,5 +1,5 @@
 
-from bio_model import dwdt, TAN_to_UIA, update_water_quality, profit
+from bio_model import dwdt, ammonia, update_water_quality, profit
 from ga import run_ga
 from params import *
 from scipy.integrate import solve_ivp
@@ -51,7 +51,7 @@ def MPC(total_days, pred_horiz, feeding_lst, T_lst, DO_lst, Q_lst,
         F0, T0, DO0, Q0 = map(float, best_ind[0])
         applied_plan.append((F0, T0, DO0, Q0))
 
-        UIA_now = TAN_to_UIA(TAN_current)
+        UIA_now = ammonia(TAN_current)
         if UIA_now > UIA_crit:
             #print(f"CRASH: UIA Critical on Day {day}")
             #break

@@ -13,8 +13,10 @@ n        = 0.78
 
 k        = 4.6
 
-T_min    = 24
-T_opt    = 33         # intrinsic optimal temperature used in tao(T)
+# T_min    = 24
+T_min    = 18
+#T_opt    = 33         # intrinsic optimal temperature used in tao(T)
+T_opt    = 30
 T_max    = 40
 T_env    = 30         # Temperature of the room
 
@@ -47,7 +49,7 @@ k_BF     = 0.7        # exponent
 
 area     = 2          # [m2] the total area of heat transfere. calculated based on the system in the lab is 10.5  
 
-PH       = 7.5        # level of PH in the water (7)
+PH_cons  = 7.5        # level of PH in the water (7)
 PK_a     = 9.4        # acidity constant 9.4 at 20C
 
 electricity_price = 0.2 #0.00015 
@@ -65,7 +67,6 @@ TAN_max = 1.0
 
 NO3_0    = 0.0        # Initial Nitrate concentration
 NO3_crit = 150.0      # Critical limit for Nitrate
-
 CO2_0    = 0.5
 CO2_crit = 20.0       # mg/L, recommend P47, else Bohr-Root effect
 CO2_max  = 40.0       # fish dies
